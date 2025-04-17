@@ -37,7 +37,7 @@ This will:
 2. Install all required dependencies
 3. Start the Flask backend server on port 5002
 4. Start the Streamlit frontend on port 8501
-5. Create log files for both services in the logs directory
+5. Create a log file for the steamlit service in the logs directory. The flask app logs directly to the console
 
 The application will be available at: http://localhost:8501
 
