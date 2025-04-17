@@ -63,9 +63,6 @@ prompt_a = {
     ).strip(),
 }
 
-#  <tenant_name>
-#         {tenant}
-#         </tenant_name>
 
 prompt_b = {
     "system_prompt": textwrap.dedent(
@@ -74,7 +71,9 @@ prompt_b = {
 
         Before we begin, here's an important piece of information you need to be aware of:
 
+        <tenant_name>
         {tenant}
+        </tenant_name>
 
         This is the name of the tenant (customer) using this system. It's crucial that you do not confuse this with the vendor name on the invoice.
 
