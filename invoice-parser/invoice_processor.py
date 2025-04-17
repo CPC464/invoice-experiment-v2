@@ -181,9 +181,6 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing LLM response and metadata
     """
-    print("Called call_llm_with_invoice")
-    print(f"Using tenant: {tenant}")
-    print(f"Global SYSTEM_PROMPT type: {type(SYSTEM_PROMPT)}")
 
     # Get the file extension
     file_extension = file_path.split(".")[-1].lower()
@@ -194,15 +191,9 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
     # Insert variables into the system prompt
     try:
         system_prompt = SYSTEM_PROMPT.format(tenant=tenant)
-        print("Formatted system_prompt successfully")
     except Exception as e:
-        print(f"Error formatting system_prompt: {str(e)}")
         # Fallback to unformatted prompt if formatting fails
         system_prompt = SYSTEM_PROMPT
-        print("Using unformatted system_prompt as fallback")
-
-    print("System prompt after formatting:")
-    print(system_prompt)
 
     if file_extension == "pdf":
         # Handle PDF by converting to images
@@ -222,8 +213,6 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
     prompt_messages = []
 
     if LLM_PROVIDER == "openai":
-        print("Formatting OpenAI message with image_url")
-
         # Add OpenAI-specific messages
         prompt_messages.append(SystemMessage(content=system_prompt))
         prompt_messages.append(
@@ -248,9 +237,6 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
 
     # Process with the vision model
     response = vision_model.invoke(prompt_messages)
-
-    print("Model response:")
-    print(response.content)
 
     # Log the model response with raw data
     log_model_response(
@@ -287,18 +273,12 @@ def extract_token_usage(response) -> Dict[str, int]:
 
     # Extract token usage from the response
     if hasattr(response, "usage") and response.usage:
-        print("Found direct response.usage!")
         token_usage = response.usage
-        print(f"Direct usage: {token_usage}")
     elif hasattr(response, "response_metadata") and response.response_metadata:
         if "usage" in response.response_metadata:
-            print("Found usage in response_metadata")
             token_usage = response.response_metadata["usage"]
-            print(f"Metadata usage: {token_usage}")
         elif "token_usage" in response.response_metadata:
-            print("Found token_usage in response_metadata")
             token_usage = response.response_metadata["token_usage"]
-            print(f"Metadata token_usage: {token_usage}")
 
     # Extract token counts from token_usage
     if token_usage:
@@ -430,7 +410,6 @@ def process_invoice(
     Returns:
         Dictionary containing extracted invoice data or error information
     """
-    print(f"Processing invoice: {file_path} for tenant: {tenant}")
     try:
         # Start timing the processing
         start_time = time.time()
@@ -553,36 +532,12 @@ def log_model_response(response, metadata=None):
     # Add raw usage data if available - directly from the response without processing
     if hasattr(response, "usage") and response.usage:
         log_entry["token_usage"] = response.usage
-        print(f"Logging raw token usage: {response.usage}")
     elif hasattr(response, "response_metadata") and response.response_metadata:
         # For LangChain
         if "usage" in response.response_metadata:
             log_entry["token_usage"] = response.response_metadata["usage"]
-            print(
-                f"Logging token usage from response_metadata: {response.response_metadata['usage']}"
-            )
         elif "token_usage" in response.response_metadata:
             log_entry["token_usage"] = response.response_metadata["token_usage"]
-            print(
-                f"Logging token_usage from response_metadata: {response.response_metadata['token_usage']}"
-            )
 
     # Log the pretty-printed entry
     MODEL_RESPONSE_LOGGER.info(log_entry)
-
-
-# Example usage if run directly
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-        # Default tenant or use from command line if provided
-        tenant = "Crispa Technologies ApS"
-        if len(sys.argv) > 2:
-            tenant = sys.argv[2]
-        print(f"Processing invoice: {file_path} for tenant: {tenant}")
-        result = process_invoice(file_path, tenant)
-        print(json.dumps(result, indent=2))
-    else:
-        print("Please provide an invoice file path")
