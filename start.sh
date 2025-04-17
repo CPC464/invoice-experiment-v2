@@ -76,7 +76,8 @@ mkdir -p "$APP_DIR/logs"
 # Start both services in background
 echo -e "${BLUE}=====================================${NC}"
 echo -e "${GREEN}Starting Flask backend on port 5002...${NC}"
-cd "$APP_DIR" && python3 app.py > logs/flask.log 2>&1 &
+cd "$APP_DIR" && python3 app.py &
+# cd "$APP_DIR" && python3 app.py 2>&1 | tee logs/flask.log &
 FLASK_PID=$!
 
 # Wait a bit for Flask to start

@@ -4,6 +4,7 @@ import base64
 import io
 import time
 import logging
+import textwrap
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from dotenv import load_dotenv
@@ -11,12 +12,21 @@ from PIL import Image
 import fitz  # PyMuPDF - the actual import name is 'fitz'
 
 # Import LangChain components
-from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
+from langchain_openai import ChatOpenAI  # Updated import for OpenAI
+from langchain_community.chat_models import ChatAnthropic
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.prompts import ChatPromptTemplate
 
+# Import prompts
+from prompts import prompt_a, prompt_b
+
+
 # Load environment variables
 load_dotenv(dotenv_path=".env.local")
+
+# Set prompts - Define these globally as they were before
+SYSTEM_PROMPT = prompt_a["system_prompt"]
+HUMAN_PROMPT = prompt_a["human_prompt"]
 
 # Constants for LLM configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -75,11 +85,8 @@ def get_vision_model():
     """
     Initialize and return the appropriate vision-capable LLM based on configuration
     """
-    print(f"Initializing vision model with provider: {LLM_PROVIDER}")
-
     if LLM_PROVIDER == "openai":
         # Initialize OpenAI vision model
-        print(f"Using OpenAI model: {OPENAI_MODEL}")
         return ChatOpenAI(
             model=OPENAI_MODEL,
             api_key=OPENAI_API_KEY,
@@ -89,7 +96,6 @@ def get_vision_model():
         )
     elif LLM_PROVIDER == "anthropic":
         # Import Anthropic integration if needed
-        print(f"Using Anthropic model: {ANTHROPIC_MODEL}")
         return ChatAnthropic(
             model=ANTHROPIC_MODEL,
             api_key=ANTHROPIC_API_KEY,
@@ -100,27 +106,6 @@ def get_vision_model():
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {LLM_PROVIDER}")
-
-
-# System prompt template for invoice extraction
-SYSTEM_PROMPT_TEMPLATE = """You are an AI assistant specialized in extracting information from invoices.
-Analyze the provided invoice image and extract these fields in JSON format:
-
-1. vendor_name: The company or entity that issued the invoice. IMPORTANT: This cannot be the name of the {tenant}. Make sure to check the footer of the invoice, since the vendor name could be stated there.
-2. due_date: When payment is required (in YYYY-MM-DD format). This could also be the invoice date.
-3. paid_date: When the invoice was actually paid, if applicable (in YYYY-MM-DD format). This might not be stated explicitly on the invoice, for invoices paid by credit card, so use judgement here.
-4. service_from: Start date of the service period (in YYYY-MM-DD format). This might not be stated explicitly on the invoice, so use judgement here.
-5. service_to: End date of the service period (in YYYY-MM-DD format). This might not be stated explicitly on the invoice, so use judgement here.
-6. currency: The currency used for the invoice (Must be in ISO 3-letter format, e.g. USD, EUR, GBP, DKK, SEK, NOK, CHF, JPY, CNY, INR, etc.)
-7. net_amount: The amount before tax/VAT (numerical value only)
-8. vat_amount: The value-added tax or similar tax amount (numerical value only)
-9. gross_amount: The total amount including taxes (numerical value only)
-
-Respond with a JSON object containing these fields. If a field is not found, use null, unless you have been able to otherwise infer it from the invoice.
-Do not include any explanations, just the JSON object."""
-
-# Human message template for prompt
-HUMAN_PROMPT = """Please extract the required invoice information from this image."""
 
 
 def encode_image(image_path: str) -> str:
@@ -185,6 +170,252 @@ def calculate_cost(prompt_tokens, completion_tokens):
     return prompt_cost + completion_cost
 
 
+def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
+    """
+    Process an invoice file (PDF or image) and get the LLM response
+
+    Args:
+        file_path: Path to the invoice file
+        tenant: Name of the tenant/company that's using this service
+
+    Returns:
+        Dictionary containing LLM response and metadata
+    """
+    print("Called call_llm_with_invoice")
+    print(f"Using tenant: {tenant}")
+    print(f"Global SYSTEM_PROMPT type: {type(SYSTEM_PROMPT)}")
+
+    # Get the file extension
+    file_extension = file_path.split(".")[-1].lower()
+
+    # Initialize vision model
+    vision_model = get_vision_model()
+
+    # Insert variables into the system prompt
+    try:
+        system_prompt = SYSTEM_PROMPT.format(tenant=tenant)
+        print("Formatted system_prompt successfully")
+    except Exception as e:
+        print(f"Error formatting system_prompt: {str(e)}")
+        # Fallback to unformatted prompt if formatting fails
+        system_prompt = SYSTEM_PROMPT
+        print("Using unformatted system_prompt as fallback")
+
+    print("System prompt after formatting:")
+    print(system_prompt)
+
+    if file_extension == "pdf":
+        # Handle PDF by converting to images
+        images = pdf_to_images(file_path)
+
+        # For now, just process the first page
+        # TODO: Implement logic for combining results from all pages
+        image_data = images[0]
+
+        # Convert bytes to base64
+        image_base64 = base64.b64encode(image_data).decode("utf-8")
+    else:
+        # Handle image formats directly
+        image_base64 = encode_image(file_path)
+
+    # Create messages for the LLM
+    prompt_messages = []
+
+    if LLM_PROVIDER == "openai":
+        print("Formatting OpenAI message with image_url")
+
+        # Add OpenAI-specific messages
+        prompt_messages.append(SystemMessage(content=system_prompt))
+        prompt_messages.append(
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": HUMAN_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                    },
+                ]
+            )
+        )
+    elif LLM_PROVIDER == "anthropic":
+        # Add Anthropic-specific messages
+        prompt_messages.append(SystemMessage(content=system_prompt))
+        prompt_messages.append(
+            HumanMessage(
+                content=f"{HUMAN_PROMPT}\n\n<image data:image/jpeg;base64,{image_base64}>"
+            )
+        )
+
+    # Process with the vision model
+    response = vision_model.invoke(prompt_messages)
+
+    print("Model response:")
+    print(response.content)
+
+    # Log the model response with raw data
+    log_model_response(
+        response,
+        metadata={
+            "file": os.path.basename(file_path),
+            "file_type": file_extension,
+            "tenant": tenant,
+        },
+    )
+
+    # Return the response and file extension
+    return {
+        "response": response,
+        "file_extension": file_extension,
+    }
+
+
+def extract_token_usage(response) -> Dict[str, int]:
+    """
+    Extract token usage information from the LLM response
+
+    Args:
+        response: The LLM response object
+
+    Returns:
+        Dictionary with token counts
+    """
+    # Initialize token counts
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    token_usage = None
+
+    # Extract token usage from the response
+    if hasattr(response, "usage") and response.usage:
+        print("Found direct response.usage!")
+        token_usage = response.usage
+        print(f"Direct usage: {token_usage}")
+    elif hasattr(response, "response_metadata") and response.response_metadata:
+        if "usage" in response.response_metadata:
+            print("Found usage in response_metadata")
+            token_usage = response.response_metadata["usage"]
+            print(f"Metadata usage: {token_usage}")
+        elif "token_usage" in response.response_metadata:
+            print("Found token_usage in response_metadata")
+            token_usage = response.response_metadata["token_usage"]
+            print(f"Metadata token_usage: {token_usage}")
+
+    # Extract token counts from token_usage
+    if token_usage:
+        prompt_tokens = token_usage.get("prompt_tokens", 0)
+        completion_tokens = token_usage.get("completion_tokens", 0)
+        total_tokens = token_usage.get("total_tokens", 0)
+        # Calculate total if not provided
+        if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
+            total_tokens = prompt_tokens + completion_tokens
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def parse_llm_response(
+    llm_result: Dict[str, Any], file_path: str, tenant: str, processing_time: int
+) -> Dict[str, Any]:
+    """
+    Parse the LLM response and format the final result
+
+    Args:
+        llm_result: Dictionary containing LLM response
+        file_path: Path to the original invoice file
+        tenant: Name of the tenant/company
+        processing_time: Processing time in milliseconds
+
+    Returns:
+        Dictionary containing structured invoice data
+    """
+    response = llm_result["response"]
+
+    # Extract token usage information
+    token_info = extract_token_usage(response)
+    prompt_tokens = token_info["prompt_tokens"]
+    completion_tokens = token_info["completion_tokens"]
+    total_tokens = token_info["total_tokens"]
+
+    try:
+        # Different models might format their responses differently
+        response_text = response.content
+
+        # Handle cases where model wraps JSON in code blocks
+        if "```json" in response_text:
+            json_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            json_text = response_text.split("```")[1].strip()
+        else:
+            json_text = response_text.strip()
+
+        # Parse the JSON
+        result = json.loads(json_text)
+
+        # List of required fields to check for null values
+        required_fields = [
+            "vendor_name",
+            "due_date",
+            "paid_date",
+            "service_from",
+            "service_to",
+            "currency",
+            "net_amount",
+            "vat_amount",
+            "gross_amount",
+        ]
+
+        # Validate required fields and count completed (non-null) fields
+        completed_fields_count = 0
+
+        for field in required_fields:
+            if field not in result:
+                result[field] = None
+            else:
+                # Count non-null fields
+                if result[field] is not None:
+                    completed_fields_count += 1
+
+        # Add completed fields count to the result
+        result["completed_fields"] = completed_fields_count
+
+        # Add metadata
+        result["processed_at"] = datetime.now().isoformat()
+        result["filename"] = os.path.basename(file_path)
+        result["tenant"] = tenant
+
+        # Add performance and token usage metrics
+        result["processing_time"] = processing_time
+        result["prompt_tokens"] = prompt_tokens
+        result["completion_tokens"] = completion_tokens
+        result["total_tokens"] = total_tokens
+
+        # Calculate cost (if possible)
+        total_cost = calculate_cost(prompt_tokens, completion_tokens)
+        result["total_cost"] = total_cost
+
+        return result
+
+    except json.JSONDecodeError as e:
+        # If we can't parse the JSON, return an error
+        print(f"JSON decode error: {str(e)}")
+        return {
+            "error": f"Failed to parse JSON from model response: {str(e)}",
+            "raw_response": response.content,
+            "processed_at": datetime.now().isoformat(),
+            "filename": os.path.basename(file_path),
+            "tenant": tenant,
+            "processing_time": processing_time,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "total_cost": calculate_cost(prompt_tokens, completion_tokens),
+            "completed_fields": 0,  # No fields completed in case of error
+        }
+
+
 def process_invoice(
     file_path: str, tenant: str = "Crispa Technologies ApS"
 ) -> Dict[str, Any]:
@@ -199,192 +430,24 @@ def process_invoice(
     Returns:
         Dictionary containing extracted invoice data or error information
     """
+    print(f"Processing invoice: {file_path} for tenant: {tenant}")
     try:
-        print(f"Starting to process invoice: {file_path}")
-
         # Start timing the processing
         start_time = time.time()
 
-        # Get the file extension
-        file_extension = file_path.split(".")[-1].lower()
-
-        # Initialize vision model
-        vision_model = get_vision_model()
-
-        # Format the system prompt with tenant information
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(tenant=tenant)
-
-        if file_extension == "pdf":
-            # Handle PDF by converting to images
-            images = pdf_to_images(file_path)
-
-            # For now, just process the first page
-            # A more advanced implementation could combine results from all pages
-            # TODO: Implement logic for combining results from all pages
-            image_data = images[0]
-
-            # Convert bytes to base64
-            image_base64 = base64.b64encode(image_data).decode("utf-8")
-        else:
-            # Handle image formats directly
-            image_base64 = encode_image(file_path)
-
-        # Create messages for the LLM
-        prompt_messages = []
-
-        if LLM_PROVIDER == "openai":
-            print("Formatting OpenAI message with image_url")
-
-            # Add OpenAI-specific messages
-            prompt_messages.append(SystemMessage(content=system_prompt))
-            prompt_messages.append(
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": HUMAN_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}"
-                            },
-                        },
-                    ]
-                )
-            )
-        elif LLM_PROVIDER == "anthropic":
-            # Add Anthropic-specific messages
-            prompt_messages.append(SystemMessage(content=system_prompt))
-            prompt_messages.append(
-                HumanMessage(
-                    content=f"{HUMAN_PROMPT}\n\n<image data:image/jpeg;base64,{image_base64}>"
-                )
-            )
-
-        # Process with the vision model
-        response = vision_model.invoke(prompt_messages)
-
-        # Initialize token counts for return value and cost calculation
-        prompt_tokens = 0
-        completion_tokens = 0
-        total_tokens = 0
-
-        # IMPORTANT: Extract token usage from the response for returning in result
-        token_usage = None
-
-        # Direct extraction of token usage from the response
-        if hasattr(response, "usage") and response.usage:
-            print("Found direct response.usage!")
-            token_usage = response.usage
-            print(f"Direct usage: {token_usage}")
-        elif hasattr(response, "response_metadata") and response.response_metadata:
-            if "usage" in response.response_metadata:
-                print("Found usage in response_metadata")
-                token_usage = response.response_metadata["usage"]
-                print(f"Metadata usage: {token_usage}")
-            elif "token_usage" in response.response_metadata:
-                print("Found token_usage in response_metadata")
-                token_usage = response.response_metadata["token_usage"]
-                print(f"Metadata token_usage: {token_usage}")
-
-        # Extract token counts from token_usage
-        if token_usage:
-            prompt_tokens = token_usage.get("prompt_tokens", 0)
-            completion_tokens = token_usage.get("completion_tokens", 0)
-            total_tokens = token_usage.get("total_tokens", 0)
-            # If total_tokens isn't provided but we have both prompt and completion, calculate it
-            if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-                total_tokens = prompt_tokens + completion_tokens
-
-        # Log the model response with raw data
-        log_model_response(
-            response,
-            metadata={
-                "file": os.path.basename(file_path),
-                "file_type": file_extension,
-                "tenant": tenant,
-            },
-        )
+        # Step 1: Call LLM with invoice
+        llm_result = call_llm_with_invoice(file_path, tenant)
 
         # Calculate processing time
         processing_time = int(
             (time.time() - start_time) * 1000
         )  # Convert to milliseconds
 
-        # Extract JSON from response
-        try:
-            # Different models might format their responses differently
-            response_text = response.content
+        # Step 2: Parse the LLM response
+        result = parse_llm_response(llm_result, file_path, tenant, processing_time)
 
-            # Handle cases where model wraps JSON in code blocks
-            if "```json" in response_text:
-                json_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                json_text = response_text.split("```")[1].strip()
-            else:
-                json_text = response_text.strip()
+        return result
 
-            # Parse the JSON
-            result = json.loads(json_text)
-
-            # List of required fields to check for null values
-            required_fields = [
-                "vendor_name",
-                "due_date",
-                "paid_date",
-                "service_from",
-                "service_to",
-                "currency",
-                "net_amount",
-                "vat_amount",
-                "gross_amount",
-            ]
-
-            # Validate required fields and count completed (non-null) fields
-            completed_fields_count = 0
-
-            for field in required_fields:
-                if field not in result:
-                    result[field] = None
-                else:
-                    # Count non-null fields
-                    if result[field] is not None:
-                        completed_fields_count += 1
-
-            # Add completed fields count to the result
-            result["completed_fields"] = completed_fields_count
-
-            # Add metadata
-            result["processed_at"] = datetime.now().isoformat()
-            result["filename"] = os.path.basename(file_path)
-            result["tenant"] = tenant  # Add tenant to result metadata
-
-            # Add performance and token usage metrics
-            result["processing_time"] = processing_time
-            result["prompt_tokens"] = prompt_tokens
-            result["completion_tokens"] = completion_tokens
-            result["total_tokens"] = total_tokens
-
-            # Calculate cost (if possible)
-            total_cost = calculate_cost(prompt_tokens, completion_tokens)
-            result["total_cost"] = total_cost
-
-            return result
-
-        except json.JSONDecodeError as e:
-            # If we can't parse the JSON, return an error
-            print(f"JSON decode error: {str(e)}")
-            return {
-                "error": f"Failed to parse JSON from model response: {str(e)}",
-                "raw_response": response.content,
-                "processed_at": datetime.now().isoformat(),
-                "filename": os.path.basename(file_path),
-                "tenant": tenant,
-                "processing_time": processing_time,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "total_cost": calculate_cost(prompt_tokens, completion_tokens),
-                "completed_fields": 0,  # No fields completed in case of error
-            }
     except Exception as e:
         # Handle any other exceptions
         print(f"Error processing invoice: {str(e)}")
@@ -417,8 +480,6 @@ def generate_thumbnail(
         Path to the generated thumbnail
     """
     try:
-        print(f"Generating thumbnail for: {file_path}")
-
         # Get the file extension
         file_extension = file_path.split(".")[-1].lower()
 
@@ -451,7 +512,6 @@ def generate_thumbnail(
 
         # Save thumbnail with higher quality
         img.save(thumbnail_path, "JPEG", quality=95)
-        print(f"Thumbnail saved to: {thumbnail_path}")
 
         return thumbnail_path
 
