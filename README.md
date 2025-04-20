@@ -25,7 +25,9 @@ The application extracts the following data from invoices:
 
 ## Quick Start
 
-To start the invoice parser application, simply run:
+1. Create an .env.local file in the /invoice-parser dir, copy the contents of .env.example to this file, and insert your Open AI API key (The anthropic key is not used yet)
+
+2. Start the application by running:
 
 ```bash
 ./start.sh
@@ -38,8 +40,6 @@ This will:
 3. Start the Flask backend server on port 5002
 4. Start the Streamlit frontend on port 8501
 5. Create a log file for the steamlit service in the logs directory. The flask app logs directly to the console
-
-The application will be available at: http://localhost:8501
 
 Press Ctrl+C to stop both services when you're done.
 
