@@ -24,7 +24,7 @@ from prompts import prompt_a, prompt_b
 # Load environment variables
 load_dotenv(dotenv_path=".env.local")
 
-# Set prompts - Define these globally as they were before
+# Set prompts
 SYSTEM_PROMPT = prompt_a["system_prompt"]
 HUMAN_PROMPT = prompt_a["human_prompt"]
 
