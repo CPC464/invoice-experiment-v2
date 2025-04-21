@@ -13,11 +13,19 @@ prompt_a = {
         
         2. due_date: 
         - When payment is required (in YYYY-MM-DD format). 
-        - This could also be the invoice date.
+        - In practice this will never be null.
+        - This could be the invoice date.
+        - This could als be called payment date or something similar.
+        - It could also be that it is not stated explicitly on the invoice, but instead just implied by the payment terms, like "due within 30 days" or "net 10 days" or something similar.
+        - Use judgement here, and use code to calculate the due date based on the payment terms if needed.
+        - As a last resort, you can use the invoice date or the service_from date as the due date.
         
         3. paid_date: 
         - When the invoice was actually paid, if applicable (in YYYY-MM-DD format). 
         - This might not be stated explicitly on the invoice, for invoices paid by credit card, so use judgement here.
+        - Check if the invoice has been paid by credit card, and if so, use the invoice date as the paid date.
+        - Check of the invoice states anything about automatic payment, if so use the due date as the paid date.
+        - Check if the ivoice mentions a status of "paid", if so use the invoice date as the paid date.
         
         4. service_from: 
         - Start date of the service period (in YYYY-MM-DD format). 
@@ -45,11 +53,17 @@ prompt_a = {
         - The value-added tax or similar tax amount (numerical value only)
         - If the vat amount is not stated, return 0.
 
-        7. net_amount: 
+        9. net_amount: 
         - The amount before tax/VAT (numerical value only)
         - If the net amount is not stated, you can calculate it by subtracting the vat amount from the gross amount.
         - With the above rules you should alwasy be able to return values for all three amounts.
         - Only in extremely rare cases should you return null for any of the the three amounts.
+
+        10. document_type:
+        - The type of document, for example "invoice", "order", "purchase order", "delivery note", "credit note", "debit note", "proforma invoice", "quotation", "receipt", "other"
+        - This will practically always be stated on the document.
+        - Some documents might have multiple types, for example "invoice" and "receipt", so you should return a list of types.
+        - If it is not stated, return "other"
 
         Respond with a JSON object containing these fields. If a field is not found, use null, unless you have been able to otherwise infer it from the invoice.
     

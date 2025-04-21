@@ -6,6 +6,7 @@ import time
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+from invoice_processor import required_fields
 
 # Load environment variables
 load_dotenv(dotenv_path=".env.local")  # Updated to use .env.local instead of .env
@@ -219,7 +220,7 @@ with st.container():
             token_info = ""
             cost_info = ""
             time_info = ""
-            completed_fields = "0/9"  # Default value
+            completed_fields = f"0/{len(required_fields)}"  # Default value
 
             if job_info["status"] == "completed" and job_info.get("result"):
                 result = job_info["result"]
@@ -238,7 +239,9 @@ with st.container():
                     "completed_fields" in result
                     and result["completed_fields"] is not None
                 ):
-                    completed_fields = f"{result['completed_fields']}/9"
+                    completed_fields = (
+                        f"{result['completed_fields']}/{len(required_fields)}"
+                    )
 
             # Check if this job is the selected invoice
             is_selected = False
@@ -393,6 +396,9 @@ with st.container():
 
                 # Vendor information
                 st.markdown(f"**Vendor:** {result.get('vendor_name', 'N/A')}")
+                st.markdown(
+                    f"**Document Type(s):** {', '.join(t for t in result.get('document_type', 'N/A'))}"
+                )
                 st.markdown("---")
 
                 # Date information
@@ -431,7 +437,9 @@ with st.container():
                     "completed_fields" in result
                     and result["completed_fields"] is not None
                 ):
-                    st.markdown(f"**Completed Fields:** {result['completed_fields']}/9")
+                    st.markdown(
+                        f"**Completed Fields:** {result['completed_fields']}/{len(required_fields)}"
+                    )
     else:
         st.info("No completed jobs available yet.")
 

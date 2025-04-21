@@ -80,6 +80,20 @@ class PrettyJSONFormatter(logging.Formatter):
 model_responses_handler.setFormatter(PrettyJSONFormatter())
 MODEL_RESPONSE_LOGGER.addHandler(model_responses_handler)
 
+# List of required fields to check for null values
+required_fields = [
+    "vendor_name",
+    "document_type",
+    "due_date",
+    "paid_date",
+    "service_from",
+    "service_to",
+    "currency",
+    "net_amount",
+    "vat_amount",
+    "gross_amount",
+]
+
 
 def get_vision_model():
     """
@@ -333,19 +347,6 @@ def parse_llm_response(
 
         # Parse the JSON
         result = json.loads(json_text)
-
-        # List of required fields to check for null values
-        required_fields = [
-            "vendor_name",
-            "due_date",
-            "paid_date",
-            "service_from",
-            "service_to",
-            "currency",
-            "net_amount",
-            "vat_amount",
-            "gross_amount",
-        ]
 
         # Validate required fields and count completed (non-null) fields
         completed_fields_count = 0
