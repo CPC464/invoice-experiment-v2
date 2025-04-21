@@ -2,7 +2,27 @@
 # Quick script to kill all processes using port 5002
 # Use with caution!
 
-PORT=5002
+# Set the base directory to the script location
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$BASE_DIR"
+
+# Application directory
+APP_DIR="$BASE_DIR/invoice-parser"
+
+# Read port from .env.local
+if [ ! -f "$APP_DIR/.env.local" ]; then
+    echo "Error: .env.local file not found in $APP_DIR"
+    exit 1
+fi
+
+# Extract PORT from .env.local
+PORT=$(grep -E "^PORT=" "$APP_DIR/.env.local" | cut -d "=" -f2)
+
+if [ -z "$PORT" ]; then
+    echo "Error: PORT not defined in .env.local"
+    exit 1
+fi
+
 echo "Looking for processes on port $PORT..."
 
 # Get PIDs of processes using the port (macOS specific)
@@ -38,10 +58,10 @@ else
 fi
 
 # Define the directories to clean
-LOGS_DIR="invoice-parser/logs"
-THUMBNAILS_DIR="invoice-parser/thumbnails"
-UPLOADS_DIR="invoice-parser/uploads"
-RESULTS_DIR="invoice-parser/results"
+LOGS_DIR="$APP_DIR/logs"
+THUMBNAILS_DIR="$APP_DIR/thumbnails"
+UPLOADS_DIR="$APP_DIR/uploads"
+RESULTS_DIR="$APP_DIR/results"
 
 # Clean up log files
 if [ -d "$LOGS_DIR" ]; then

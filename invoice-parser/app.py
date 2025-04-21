@@ -308,6 +308,7 @@ def clear_all_data():
 
 
 if __name__ == "__main__":
+    # Get port from environment variable (centrally defined in .env file)
     port = int(os.getenv("PORT", "5002"))
 
     # Register signal handlers for graceful shutdown

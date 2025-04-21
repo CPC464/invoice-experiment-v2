@@ -11,12 +11,28 @@ APP_DIR="$BASE_DIR/invoice-parser"
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Print header
 echo -e "${BLUE}=====================================${NC}"
 echo -e "${BLUE}  Invoice Parser Startup Script      ${NC}"
 echo -e "${BLUE}=====================================${NC}"
+
+# Check for .env.local file first
+if [ ! -f "$APP_DIR/.env.local" ]; then
+    echo -e "${RED}Error: .env.local file not found in $APP_DIR${NC}"
+    echo -e "${YELLOW}Please create .env.local file by copying .env.template and filling in your API keys${NC}"
+    exit 1
+fi
+
+# Extract PORT from .env.local file
+PORT=$(grep -E "^PORT=" "$APP_DIR/.env.local" | cut -d '=' -f2)
+if [ -z "$PORT" ]; then
+    echo -e "${RED}Error: PORT not defined in .env.local${NC}"
+    exit 1
+fi
+echo -e "${GREEN}Using PORT: ${PORT}${NC}"
 
 # Function to check if a command exists
 command_exists() {
@@ -33,11 +49,21 @@ fi
 PY_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
 echo -e "${GREEN}Using Python version: ${PY_VERSION}${NC}"
 
+# Determine Python binary to use for venv creation (prefer 3.12 if available)
+PYTHON_BIN="python3"
+if command_exists python3.12; then
+    PYTHON_BIN="python3.12"
+    echo -e "${GREEN}Python 3.12 found and will be used to create the virtual environment${NC}"
+elif [[ $PY_VERSION == 3.13* ]]; then
+    echo -e "${YELLOW}Note: You're using Python ${PY_VERSION}. Some libraries may have compatibility issues.${NC}"
+    echo -e "${YELLOW}Installing Python 3.12 is recommended for best compatibility.${NC}"
+fi
+
 # Set up virtual environment
 VENV_DIR="$BASE_DIR/venv"
 if [ ! -d "$VENV_DIR" ]; then
-    echo -e "${YELLOW}Creating virtual environment...${NC}"
-    python3 -m venv "$VENV_DIR"
+    echo -e "${YELLOW}Creating virtual environment using ${PYTHON_BIN}...${NC}"
+    $PYTHON_BIN -m venv "$VENV_DIR"
 else
     echo -e "${GREEN}Virtual environment already exists${NC}"
 fi
@@ -73,23 +99,26 @@ mkdir -p "$APP_DIR/thumbnails"
 # Make log directory
 mkdir -p "$APP_DIR/logs"
 
+# Get the full path to the virtual environment's Python
+VENV_PYTHON="$VENV_DIR/bin/python3"
+VENV_STREAMLIT="$VENV_DIR/bin/streamlit"
+
 # Start both services in background
 echo -e "${BLUE}=====================================${NC}"
-echo -e "${GREEN}Starting Flask backend on port 5002...${NC}"
-cd "$APP_DIR" && python3 app.py &
-# cd "$APP_DIR" && python3 app.py 2>&1 | tee logs/flask.log &
+echo -e "${GREEN}Starting Flask backend on port ${PORT}...${NC}"
+cd "$APP_DIR" && $VENV_PYTHON app.py &
 FLASK_PID=$!
 
 # Wait a bit for Flask to start
 sleep 2
 
 echo -e "${GREEN}Starting Streamlit frontend on port 8501...${NC}"
-cd "$APP_DIR" && streamlit run streamlit_app.py > logs/streamlit.log 2>&1 &
+cd "$APP_DIR" && $VENV_STREAMLIT run streamlit_app.py > logs/streamlit.log 2>&1 &
 STREAMLIT_PID=$!
 
 echo -e "${BLUE}=====================================${NC}"
 echo -e "${GREEN}Services started successfully!${NC}"
-echo -e "${YELLOW}Backend API:${NC} http://localhost:5002"
+echo -e "${YELLOW}Backend API:${NC} http://localhost:${PORT}"
 echo -e "${YELLOW}Frontend UI:${NC} http://localhost:8501"
 echo -e "${YELLOW}Log files:${NC} $APP_DIR/logs/flask.log and $APP_DIR/logs/streamlit.log"
 echo -e "${BLUE}=====================================${NC}"

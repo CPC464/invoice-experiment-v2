@@ -43,6 +43,17 @@ This will:
 
 Press Ctrl+C to stop both services when you're done.
 
+## Configuration
+
+The application configuration is stored in `invoice-parser/.env.local`. Key settings include:
+
+- `PORT`: The port for the Flask backend (default: 5002)
+- `OPENAI_API_KEY`: Your OpenAI API key for invoice parsing
+- `LLM_PROVIDER`: The LLM provider to use (openai or anthropic)
+- `OPENAI_MODEL`: The OpenAI model to use (default: gpt-4.1-mini)
+
+The cleanup script uses the port value from `.env.local` to find and terminate any processes using that port.
+
 ## Project Structure
 
 ```

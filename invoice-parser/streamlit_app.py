@@ -12,7 +12,7 @@ from invoice_processor import required_fields
 load_dotenv(dotenv_path=".env.local")  # Updated to use .env.local instead of .env
 
 # Configuration
-API_URL = f"http://localhost:{os.getenv('PORT', '5002')}"  # Updated port to 5002
+API_URL = f"http://localhost:{os.getenv('PORT')}"
 
 # Page setup
 st.set_page_config(page_title="Invoice Parser", page_icon="🔍", layout="wide")
@@ -171,7 +171,11 @@ with st.container():
             return False
 
     # File uploader section
-    with st.container(border=True):
+    with (
+        st.container(border=True)
+        if hasattr(st, "container") and "border" in st.container.__code__.co_varnames
+        else st.container()
+    ):
         # CSS to hide the file list that appears below the upload widget
 
         # Check if we need to clear the uploader
