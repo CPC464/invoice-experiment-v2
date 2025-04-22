@@ -32,3 +32,8 @@ attrs==25.3.0
 six==1.17.0
 charset-normalizer==3.4.1
 urllib3==2.4.0
+# Dependencies for duplicate detection
+sentence-transformers==2.7.1
+faiss-cpu==1.8.0
+# OCR dependencies
+pytesseract==0.3.10

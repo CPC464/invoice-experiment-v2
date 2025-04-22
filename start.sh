@@ -39,6 +39,25 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Check for Tesseract OCR (required for duplicate detection)
+check_tesseract() {
+    echo -e "${YELLOW}Checking for Tesseract OCR installation...${NC}"
+    if command_exists tesseract; then
+        TESSERACT_VERSION=$(tesseract --version 2>&1 | head -n 1)
+        echo -e "${GREEN}✓ Tesseract OCR is installed: ${TESSERACT_VERSION}${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  Tesseract OCR is not installed or not in PATH${NC}"
+        echo -e "${YELLOW}The duplicate detection feature will have limited functionality.${NC}"
+        echo -e "${YELLOW}To install Tesseract OCR:${NC}"
+        echo -e "${YELLOW}  - Ubuntu/Debian: sudo apt install tesseract-ocr${NC}"
+        echo -e "${YELLOW}  - macOS: brew install tesseract${NC}"
+        echo -e "${YELLOW}  - Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki${NC}"
+        echo -e "${YELLOW}             and ensure it's in your PATH${NC}"
+        return 1
+    fi
+}
+
 # Check for Python
 if ! command_exists python3; then
     echo -e "${YELLOW}Python 3 is not installed. Please install Python 3 and try again.${NC}"
@@ -90,6 +109,61 @@ if [ "$MISSING_REQS" == "1" ]; then
 else
     echo -e "${GREEN}All requirements are already installed${NC}"
 fi
+
+# Check for faiss (required for duplicate detection)
+echo -e "${YELLOW}Checking for FAISS (vector similarity) installation...${NC}"
+if ! python3 -c "import faiss" >/dev/null 2>&1; then
+    echo -e "${YELLOW}FAISS not found, installing faiss-cpu...${NC}"
+    pip install faiss-cpu
+    
+    # Verify installation
+    if ! python3 -c "import faiss" >/dev/null 2>&1; then
+        echo -e "${RED}⚠️  FAISS installation failed. Duplicate detection will not work.${NC}"
+        echo -e "${YELLOW}If you're on an M1/M2 Mac, try:${NC}"
+        echo -e "${YELLOW}  pip install faiss-cpu --no-cache-dir${NC}"
+        echo -e "${YELLOW}or install using conda:${NC}"
+        echo -e "${YELLOW}  conda install -c conda-forge faiss${NC}"
+    else
+        echo -e "${GREEN}✓ FAISS installed successfully${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ FAISS is already installed${NC}"
+fi
+
+# Check for sentence-transformers (required for duplicate detection)
+echo -e "${YELLOW}Checking for sentence-transformers installation...${NC}"
+if ! python3 -c "import sentence_transformers" >/dev/null 2>&1; then
+    echo -e "${YELLOW}sentence-transformers not found, installing...${NC}"
+    pip install sentence-transformers
+    
+    # Verify installation
+    if ! python3 -c "import sentence_transformers" >/dev/null 2>&1; then
+        echo -e "${RED}⚠️  sentence-transformers installation failed. Duplicate detection will not work.${NC}"
+    else
+        echo -e "${GREEN}✓ sentence-transformers installed successfully${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ sentence-transformers is already installed${NC}"
+fi
+
+# Check for pytesseract Python module (different from system Tesseract)
+echo -e "${YELLOW}Checking for pytesseract Python module...${NC}"
+if ! python3 -c "import pytesseract" >/dev/null 2>&1; then
+    echo -e "${YELLOW}pytesseract Python module not found, installing...${NC}"
+    pip install pytesseract
+    
+    # Verify installation
+    if ! python3 -c "import pytesseract" >/dev/null 2>&1; then
+        echo -e "${RED}⚠️  pytesseract installation failed. OCR will not work.${NC}"
+    else
+        echo -e "${GREEN}✓ pytesseract Python module installed successfully${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ pytesseract Python module is already installed${NC}"
+fi
+
+# Check for Tesseract OCR
+check_tesseract
 
 # Make sure upload and results directories exist
 mkdir -p "$APP_DIR/uploads"

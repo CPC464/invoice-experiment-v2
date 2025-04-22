@@ -17,9 +17,23 @@ from langchain_community.chat_models import ChatAnthropic
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.prompts import ChatPromptTemplate
 
-# Import prompts
-from prompts import prompt_a, prompt_b
+# Import utility functions
+from preprocess_utils import (
+    encode_image,
+    pdf_to_images,
+    generate_thumbnail,
+)
+from analytics_utils import (
+    calculate_cost,
+    extract_token_usage,
+)
+from logging_utils import log_model_response, PrettyJSONFormatter, setup_logger
 
+# Import prompts
+from prompts import prompt_a
+
+# Import duplicate detector
+from duplicate_detector import get_duplicate_detector
 
 # Load environment variables
 load_dotenv(dotenv_path=".env.local")
@@ -57,33 +71,17 @@ elif LLM_PROVIDER == "anthropic":
     COMPLETION_PRICE = float(os.getenv("ANTHROPIC_COMPLETION_PRICE"))
     # Add specific Anthropic model pricing if needed
 
-# Set up model response logger
-MODEL_RESPONSE_LOGGER = logging.getLogger("model_responses")
-MODEL_RESPONSE_LOGGER.setLevel(logging.INFO)
-
 # Ensure logs directory exists
 os.makedirs("logs", exist_ok=True)
 
-# Create a file handler for model responses
-model_responses_handler = logging.FileHandler("logs/model_responses.log")
-model_responses_handler.setLevel(logging.INFO)
-
-
-# Create a formatter for pretty-printed JSON
-class PrettyJSONFormatter(logging.Formatter):
-    def format(self, record):
-        if isinstance(record.msg, dict):
-            return json.dumps(record.msg, indent=2, sort_keys=True)
-        return super().format(record)
-
-
-model_responses_handler.setFormatter(PrettyJSONFormatter())
-MODEL_RESPONSE_LOGGER.addHandler(model_responses_handler)
+# Set up model response logger using the setup_logger function
+MODEL_RESPONSE_LOGGER = setup_logger("model_responses", "logs/model_responses.log")
 
 # List of required fields to check for null values
 required_fields = [
     "vendor_name",
-    "document_type",
+    "document_number",
+    "issue_date",
     "due_date",
     "paid_date",
     "service_from",
@@ -92,6 +90,7 @@ required_fields = [
     "net_amount",
     "vat_amount",
     "gross_amount",
+    "document_type",
 ]
 
 
@@ -120,68 +119,6 @@ def get_vision_model():
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {LLM_PROVIDER}")
-
-
-def encode_image(image_path: str) -> str:
-    """
-    Encode an image file to base64 string
-
-    Args:
-        image_path: Path to the image file
-
-    Returns:
-        Base64 encoded string of the image
-    """
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
-
-
-def pdf_to_images(pdf_path: str) -> List[bytes]:
-    """
-    Convert PDF pages to images
-
-    Args:
-        pdf_path: Path to the PDF file
-
-    Returns:
-        List of image byte data for each page
-    """
-    # Open the PDF document
-    pdf_document = fitz.open(pdf_path)
-    images = []
-
-    # Iterate through pages
-    for page_num in range(pdf_document.page_count):
-        # Get page and render at higher resolution
-        page = pdf_document.load_page(page_num)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x resolution
-        img_bytes = pix.pil_tobytes(format="JPEG")
-        images.append(img_bytes)
-
-    return images
-
-
-def calculate_cost(prompt_tokens, completion_tokens):
-    """
-    Calculate the cost in cents based on token usage and provider
-
-    Args:
-        prompt_tokens: Number of tokens in the prompt
-        completion_tokens: Number of tokens in the completion
-
-    Returns:
-        Cost in cents or None if pricing info not available
-    """
-    # Check if pricing info is available
-    if PROMPT_PRICE is None or COMPLETION_PRICE is None:
-        return None
-
-    # Calculate costs based on established pricing
-    prompt_cost = prompt_tokens * (PROMPT_PRICE / 1_000_000)
-    completion_cost = completion_tokens * (COMPLETION_PRICE / 1_000_000)
-
-    # Return total cost in cents
-    return prompt_cost + completion_cost
 
 
 def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
@@ -255,6 +192,9 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
     # Log the model response with raw data
     log_model_response(
         response,
+        MODEL_RESPONSE_LOGGER,
+        LLM_PROVIDER,
+        OPENAI_MODEL if LLM_PROVIDER == "openai" else ANTHROPIC_MODEL,
         metadata={
             "file": os.path.basename(file_path),
             "file_type": file_extension,
@@ -266,47 +206,6 @@ def call_llm_with_invoice(file_path: str, tenant: str) -> Dict[str, Any]:
     return {
         "response": response,
         "file_extension": file_extension,
-    }
-
-
-def extract_token_usage(response) -> Dict[str, int]:
-    """
-    Extract token usage information from the LLM response
-
-    Args:
-        response: The LLM response object
-
-    Returns:
-        Dictionary with token counts
-    """
-    # Initialize token counts
-    prompt_tokens = 0
-    completion_tokens = 0
-    total_tokens = 0
-    token_usage = None
-
-    # Extract token usage from the response
-    if hasattr(response, "usage") and response.usage:
-        token_usage = response.usage
-    elif hasattr(response, "response_metadata") and response.response_metadata:
-        if "usage" in response.response_metadata:
-            token_usage = response.response_metadata["usage"]
-        elif "token_usage" in response.response_metadata:
-            token_usage = response.response_metadata["token_usage"]
-
-    # Extract token counts from token_usage
-    if token_usage:
-        prompt_tokens = token_usage.get("prompt_tokens", 0)
-        completion_tokens = token_usage.get("completion_tokens", 0)
-        total_tokens = token_usage.get("total_tokens", 0)
-        # Calculate total if not provided
-        if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-            total_tokens = prompt_tokens + completion_tokens
-
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
     }
 
 
@@ -374,7 +273,9 @@ def parse_llm_response(
         result["total_tokens"] = total_tokens
 
         # Calculate cost (if possible)
-        total_cost = calculate_cost(prompt_tokens, completion_tokens)
+        total_cost = calculate_cost(
+            prompt_tokens, completion_tokens, PROMPT_PRICE, COMPLETION_PRICE
+        )
         result["total_cost"] = total_cost
 
         return result
@@ -392,13 +293,48 @@ def parse_llm_response(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
-            "total_cost": calculate_cost(prompt_tokens, completion_tokens),
+            "total_cost": calculate_cost(
+                prompt_tokens, completion_tokens, PROMPT_PRICE, COMPLETION_PRICE
+            ),
             "completed_fields": 0,  # No fields completed in case of error
         }
 
 
+def check_duplicate_invoice(file_path: str) -> Dict[str, Any]:
+    """
+    Check if the given invoice is a duplicate or related to existing invoices
+
+    Args:
+        file_path: Path to the invoice file
+
+    Returns:
+        Dictionary with duplicate detection results
+    """
+    try:
+        # Get the duplicate detector instance
+        duplicate_detector = get_duplicate_detector()
+
+        # Check for duplicates
+        duplicate_check = duplicate_detector.check_for_duplicates(file_path)
+
+        return duplicate_check
+    except Exception as e:
+        # Log the error but continue processing
+        logging.error(f"Error checking for duplicate invoice: {str(e)}")
+        return {
+            "is_duplicate": False,
+            "is_related": False,
+            "similar_documents": [],
+            "highest_score": 0,
+            "error": str(e),
+        }
+
+
 def process_invoice(
-    file_path: str, tenant: str = "Crispa Technologies ApS"
+    file_path: str,
+    tenant: str = "Crispa Technologies ApS",
+    check_duplicates: bool = True,
+    auto_reject_duplicates: bool = True,
 ) -> Dict[str, Any]:
     """
     Process an invoice file (PDF or image) and extract information
@@ -407,10 +343,34 @@ def process_invoice(
         file_path: Path to the invoice file
         tenant: Name of the tenant/company that's using this service,
                 used to identify which entity should not be considered the vendor
+        check_duplicates: Whether to check for duplicate invoices before processing
+        auto_reject_duplicates: Whether to automatically reject exact duplicates
 
     Returns:
         Dictionary containing extracted invoice data or error information
     """
+    # First, check for duplicates if enabled
+    duplicate_info = None
+    if check_duplicates:
+        duplicate_info = check_duplicate_invoice(file_path)
+
+        # If it's a duplicate and auto-reject is enabled, return without processing
+        if duplicate_info.get("is_duplicate", False) and auto_reject_duplicates:
+            return {
+                "error": "Duplicate invoice detected",
+                "processed_at": datetime.now().isoformat(),
+                "filename": os.path.basename(file_path),
+                "tenant": tenant,
+                "processing_time": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0,
+                "completed_fields": 0,
+                "is_duplicate": True,
+                "duplicate_info": duplicate_info,
+            }
+
     try:
         # Start timing the processing
         start_time = time.time()
@@ -425,6 +385,31 @@ def process_invoice(
 
         # Step 2: Parse the LLM response
         result = parse_llm_response(llm_result, file_path, tenant, processing_time)
+
+        # Add duplicate detection information if available
+        if duplicate_info:
+            result["duplicate_check"] = duplicate_info
+            result["is_duplicate"] = duplicate_info.get("is_duplicate", False)
+            result["is_related"] = duplicate_info.get("is_related", False)
+
+        # Add document to the index after successful processing
+        if check_duplicates and not duplicate_info.get("is_duplicate", False):
+            try:
+                # Generate a document ID from the file path and timestamp
+                document_id = f"{os.path.basename(file_path)}_{int(time.time())}"
+
+                # Add document to the index
+                duplicate_detector = get_duplicate_detector()
+                duplicate_detector.add_document(
+                    file_path=file_path,
+                    document_id=document_id,
+                    metadata={"tenant": tenant},
+                    extracted_data=result.get("extracted_data"),
+                )
+            except Exception as e:
+                # Log the error but continue
+                logging.error(f"Error adding document to duplicate index: {str(e)}")
+                result["duplicate_index_error"] = str(e)
 
         return result
 
@@ -443,102 +428,3 @@ def process_invoice(
             "total_cost": None,  # Set to None for consistency
             "completed_fields": 0,  # No fields completed in case of error
         }
-
-
-def generate_thumbnail(
-    file_path: str, thumbnail_path: str, max_size: tuple = (1200, 1600)
-) -> str:
-    """
-    Generate a thumbnail for an invoice file (PDF or image)
-
-    Args:
-        file_path: Path to the invoice file
-        thumbnail_path: Path where to save the thumbnail
-        max_size: Maximum dimensions for the thumbnail (width, height)
-
-    Returns:
-        Path to the generated thumbnail
-    """
-    try:
-        # Get the file extension
-        file_extension = file_path.split(".")[-1].lower()
-
-        if file_extension == "pdf":
-            # Handle PDF by converting first page to image
-            pdf_document = fitz.open(file_path)
-
-            # Get first page
-            if pdf_document.page_count > 0:
-                page = pdf_document.load_page(0)
-                pix = page.get_pixmap(
-                    matrix=fitz.Matrix(
-                        2.0, 2.0
-                    )  # Higher resolution for better readability
-                )
-                img_data = pix.pil_tobytes(format="JPEG")
-
-                # Open as PIL Image
-                img = Image.open(io.BytesIO(img_data))
-            else:
-                # Empty PDF, create blank image
-                img = Image.new("RGB", (100, 100), color="white")
-
-        else:
-            # Handle image formats directly
-            img = Image.open(file_path)
-
-        # Resize while maintaining aspect ratio
-        img.thumbnail(max_size)
-
-        # Save thumbnail with higher quality
-        img.save(thumbnail_path, "JPEG", quality=95)
-
-        return thumbnail_path
-
-    except Exception as e:
-        print(f"Error generating thumbnail: {str(e)}")
-        # Create a blank thumbnail in case of error
-        try:
-            blank = Image.new("RGB", (100, 100), color="#eeeeee")
-            blank.save(thumbnail_path, "JPEG")
-            return thumbnail_path
-        except:
-            return ""
-
-
-def log_model_response(response, metadata=None):
-    """
-    Log a model response with timestamp and metadata
-
-    Args:
-        response: The model response content
-        metadata: Optional dictionary with additional information
-    """
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "provider": LLM_PROVIDER,
-        "model": OPENAI_MODEL if LLM_PROVIDER == "openai" else ANTHROPIC_MODEL,
-    }
-
-    # Add metadata if provided
-    if metadata:
-        log_entry.update(metadata)
-
-    # Add response content
-    if hasattr(response, "content"):
-        log_entry["response"] = response.content
-    else:
-        log_entry["response"] = str(response)
-
-    # Add raw usage data if available - directly from the response without processing
-    if hasattr(response, "usage") and response.usage:
-        log_entry["token_usage"] = response.usage
-    elif hasattr(response, "response_metadata") and response.response_metadata:
-        # For LangChain
-        if "usage" in response.response_metadata:
-            log_entry["token_usage"] = response.response_metadata["usage"]
-        elif "token_usage" in response.response_metadata:
-            log_entry["token_usage"] = response.response_metadata["token_usage"]
-
-    # Log the pretty-printed entry
-    MODEL_RESPONSE_LOGGER.info(log_entry)

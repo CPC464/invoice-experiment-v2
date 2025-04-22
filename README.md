@@ -9,6 +9,7 @@ An AI-powered application that extracts structured data from invoice documents u
 - View results with thumbnails in a user-friendly interface
 - Download individual or consolidated results (JSON/CSV)
 - Clear all data with a single click
+- Duplicate invoice detection using vector embeddings and OCR
 
 ## Extracted Information
 
@@ -22,6 +23,67 @@ The application extracts the following data from invoices:
 - Net Amount
 - VAT/Tax Amount
 - Gross Amount
+
+## Requirements
+
+### API Keys
+
+- OpenAI API key (required for invoice parsing)
+
+### Software Dependencies
+
+- Python 3.8+ (3.12 recommended)
+- Tesseract OCR (required for duplicate detection with image-based files)
+- FAISS (Facebook AI Similarity Search) for vector similarity search
+- sentence-transformers for generating document embeddings
+
+#### Installing Tesseract OCR
+
+For the duplicate detection feature to work with image files and scanned PDFs, you need:
+
+1. **Tesseract OCR** (system binary installed on your machine)
+2. **pytesseract** (Python package that interfaces with Tesseract - automatically installed by our script)
+
+**Installing the Tesseract OCR system binary:**
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt install tesseract-ocr
+```
+
+**macOS:**
+
+```bash
+brew install tesseract
+```
+
+**Windows:**
+
+1. Download and install from https://github.com/UB-Mannheim/tesseract/wiki
+2. Ensure the installation path (e.g., `C:\Program Files\Tesseract-OCR`) is added to your PATH environment variable
+
+You can verify your Tesseract installation by running:
+
+```bash
+tesseract --version
+```
+
+**Note:** The startup script will automatically install the Python `pytesseract` package, but it requires the Tesseract OCR binary to be installed on your system and available in your PATH.
+
+#### Note for FAISS on Apple Silicon (M1/M2) Macs
+
+If you're using an Apple Silicon Mac and encounter issues with FAISS installation, try:
+
+```bash
+pip install faiss-cpu --no-cache-dir
+```
+
+Or install using conda:
+
+```bash
+conda install -c conda-forge faiss
+```
 
 ## Quick Start
 
@@ -37,9 +99,10 @@ This will:
 
 1. Set up a Python virtual environment in the root directory (if needed)
 2. Install all required dependencies
-3. Start the Flask backend server on port 5002
-4. Start the Streamlit frontend on port 8501
-5. Create a log file for the steamlit service in the logs directory. The flask app logs directly to the console
+3. Check for Tesseract OCR (will warn if not installed)
+4. Start the Flask backend server on port 5002
+5. Start the Streamlit frontend on port 8501
+6. Create a log file for the steamlit service in the logs directory. The flask app logs directly to the console
 
 Press Ctrl+C to stop both services when you're done.
 
